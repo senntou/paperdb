@@ -21,7 +21,7 @@ ingest:
 
 query:
 	@test -n "$(Q)" || (echo 'Q を指定してください: make query Q="質問文"'; exit 1)
-	@$(PY) scripts/query.py "$(Q)"
+	@$(PY) scripts/query.py search "$(Q)"
 
 clean:
 	rm -rf txt db .state
