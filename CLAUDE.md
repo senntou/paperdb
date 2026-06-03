@@ -10,12 +10,23 @@
 DBを検索**し、その結果に基づいて回答してください。
 
 ```
-.venv/bin/python scripts/query.py "<ユーザーの質問をそのまま、または検索向けに整えた文>"
+# 意味検索（既定: 上位5件、抜粋300文字）
+.venv/bin/python scripts/query.py search "<ユーザーの質問をそのまま、または検索向けに整えた文>"
+
+# 1論文1件に絞って一覧表示（重複排除）
+.venv/bin/python scripts/query.py search "<質問>" -u
+
+# タイトルのみ一覧（抜粋なし）
+.venv/bin/python scripts/query.py search "<質問>" -t
+
+# ヒットしたチャンクの前後を展開（source::chunk_idx は検索結果の「チャンクID」欄から）
+.venv/bin/python scripts/query.py expand "<source::chunk_idx>" -w 2
 ```
 
 - 回答には**必ず根拠となる論文タイトルと元PDF（`pdf/xxx.pdf` のp.N）を明示**する。
 - ヒットが弱い／無関係そうなら、言い換えてもう一度検索する、または「DBに該当が無さそう」と正直に伝える。
-- 検索結果は本文抜粋（チャンク）です。必要なら `txt/<source>.txt` を Read して文脈を補ってください。
+- 検索結果の「チャンクID」（例: `selectivenet::3`）を `expand` に渡すと前後の文脈を確認できます。
+- それでも文脈が足りなければ `txt/<source>.txt` を Read して補ってください。
 
 ## 取り込み（ユーザー操作）
 
