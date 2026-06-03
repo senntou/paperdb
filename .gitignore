@@ -1,0 +1,8 @@
+.venv/
+db/
+txt/
+.state/
+pdf/*.pdf
+__pycache__/
+*.pyc
+temp.md
