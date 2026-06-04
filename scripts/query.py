@@ -9,25 +9,33 @@
 from __future__ import annotations
 
 import argparse
+import json
+import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
 
 import config
 
+_SERVER_URL = f"http://127.0.0.1:{config.SERVER_PORT}"
+
+
+# ── DB チェック ─────────────────────────────────────────────────────────────
 
 def _check_db():
     if not config.DB_DIR.exists():
-        print("DBが未構築です。先に `make ingest` を実行してください。")
-        sys.exit(1)
+        raise RuntimeError("DBが未構築です。先に `make ingest` を実行してください。")
     collection = config.get_collection()
     if collection.count() == 0:
-        print("DBが空です。pdf/ にPDFを入れて `make ingest` を実行してください。")
-        sys.exit(1)
+        raise RuntimeError("DBが空です。pdf/ にPDFを入れて `make ingest` を実行してください。")
     return collection
 
 
-def cmd_search(args):
-    collection = _check_db()
+# ── ビジネスロジック（サーバー・直接呼び出し共通） ───────────────────────────
 
+def _do_search(args, collection):
     q_emb = config.embed([args.question], kind="query")
     res = collection.query(
         query_embeddings=q_emb,
@@ -47,18 +55,17 @@ def cmd_search(args):
     snippet_len = 0 if titles_only else args.snippet
     unique = args.unique or titles_only
 
-    # --unique: 同一論文から最高スコアの1チャンクだけ残す
     if unique:
-        seen: dict[str, int] = {}  # source -> 最初に登場したインデックス（距離順なので先着=最高スコア）
+        seen: dict[str, int] = {}
         filtered = []
         for i, meta in enumerate(metas):
             src = meta.get("source", "")
             if src not in seen:
                 seen[src] = i
                 filtered.append(i)
-        docs   = [docs[i]   for i in filtered]
-        metas  = [metas[i]  for i in filtered]
-        dists  = [dists[i]  for i in filtered]
+        docs  = [docs[i]  for i in filtered]
+        metas = [metas[i] for i in filtered]
+        dists = [dists[i] for i in filtered]
 
     print(f"質問: {args.question}\n")
     print(f"=== 上位 {len(docs)} 件 ===\n")
@@ -79,10 +86,7 @@ def cmd_search(args):
     return 0
 
 
-def cmd_expand(args):
-    collection = _check_db()
-
-    # "source::chunk_idx" をパース
+def _do_expand(args, collection):
     try:
         source, idx_str = args.chunk_id.rsplit("::", 1)
         center = int(idx_str)
@@ -103,7 +107,6 @@ def cmd_expand(args):
         print(f"チャンク '{args.chunk_id}' が見つかりませんでした。")
         return 1
 
-    # chunk_idx でソート
     pairs = sorted(
         zip(res["ids"], res["documents"], res["metadatas"]),
         key=lambda x: x[2].get("chunk_idx", 0),
@@ -119,12 +122,97 @@ def cmd_expand(args):
     return 0
 
 
+# ── サーバークライアント ──────────────────────────────────────────────────────
+
+def _ping() -> bool:
+    try:
+        urllib.request.urlopen(f"{_SERVER_URL}/ping", timeout=0.5)
+        return True
+    except Exception:
+        return False
+
+
+def _start_server() -> bool:
+    """serve.py をバックグラウンドで起動し、応答が来るまで待つ（最大30秒）。"""
+    serve_py = Path(__file__).parent / "serve.py"
+    subprocess.Popen(
+        [sys.executable, str(serve_py)],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    for _ in range(60):  # 0.5s × 60 = 30s
+        time.sleep(0.5)
+        if _ping():
+            return True
+    return False
+
+
+def _ensure_server() -> bool:
+    return _ping() or _start_server()
+
+
+def _call_server(command: str, args_dict: dict) -> str | None:
+    payload = json.dumps({"command": command, "args": args_dict}).encode()
+    req = urllib.request.Request(
+        f"{_SERVER_URL}/",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            result = json.loads(resp.read())
+            return result.get("output", "")
+    except Exception:
+        return None
+
+
+# ── CLIコマンド ───────────────────────────────────────────────────────────────
+
+def cmd_search(args):
+    if _ensure_server():
+        out = _call_server("search", {
+            "question": args.question,
+            "top_k": args.top_k,
+            "unique": args.unique,
+            "snippet": args.snippet,
+            "titles_only": args.titles_only,
+        })
+        if out is not None:
+            print(out, end="")
+            return 0
+    # サーバーが使えない場合は直接実行
+    try:
+        collection = _check_db()
+    except RuntimeError as e:
+        print(e)
+        return 1
+    return _do_search(args, collection)
+
+
+def cmd_expand(args):
+    if _ensure_server():
+        out = _call_server("expand", {
+            "chunk_id": args.chunk_id,
+            "window": args.window,
+        })
+        if out is not None:
+            print(out, end="")
+            return 0
+    # サーバーが使えない場合は直接実行
+    try:
+        collection = _check_db()
+    except RuntimeError as e:
+        print(e)
+        return 1
+    return _do_expand(args, collection)
+
+
 def main():
     ap = argparse.ArgumentParser(description="論文ベクトルDB検索")
     sub = ap.add_subparsers(dest="command", metavar="<command>")
     sub.required = True
 
-    # ---------- search ----------
     sp = sub.add_parser("search", help="意味検索")
     sp.add_argument("question", help="質問文（日本語可）")
     sp.add_argument("-k", "--top-k",  type=int, default=5,   help="取得チャンク数（既定5）")
@@ -133,7 +221,6 @@ def main():
     sp.add_argument("-t", "--titles-only", action="store_true", help="タイトル＋スコアのみ表示（-u -s 0 相当）")
     sp.set_defaults(func=cmd_search)
 
-    # ---------- expand ----------
     ep = sub.add_parser("expand", help="指定チャンクの前後を表示")
     ep.add_argument("chunk_id", help="チャンクID（例: selectivenet::3）")
     ep.add_argument("-w", "--window", type=int, default=2, help="前後何チャンクを表示するか（既定2）")

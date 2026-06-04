@@ -16,6 +16,7 @@ STATE_FILE = STATE_DIR / "manifest.json"
 # 日英クロスリンガル検索に強い多言語モデル。e5系は passage/query プレフィックス必須。
 MODEL_NAME = "intfloat/multilingual-e5-large"
 COLLECTION = "papers"
+SERVER_PORT = 18964
 
 # --- チャンク設定 -------------------------------------------------------
 CHUNK_CHARS = 1000
