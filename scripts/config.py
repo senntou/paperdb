@@ -23,17 +23,17 @@ CHUNK_OVERLAP = 150
 
 
 def _pick_device():
-    """使用デバイスを決定。環境変数 PAPERDB_DEVICE で明示指定可（cpu/cuda）。
-
-    既定は cpu。GTX 1080 Ti(sm_61) は新しい torch 公式ビルドが非対応のため、
-    GPUを使うには Pascal対応 torch(cu121系)へ入れ替えたうえで PAPERDB_DEVICE=cuda を指定する。
-    """
+    """使用デバイスを決定。環境変数 PAPERDB_DEVICE で明示指定可（cpu/cuda）。既定は CUDA 自動検出。"""
     import os
 
     forced = os.environ.get("PAPERDB_DEVICE", "").strip().lower()
-    if forced in ("cpu", "cuda"):
+    if forced in ("cpu", "cuda") or forced.startswith("cuda:"):
         return forced
-    return "cpu"
+    try:
+        import torch
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except ImportError:
+        return "cpu"
 
 
 @functools.lru_cache(maxsize=1)
@@ -50,11 +50,13 @@ def embed(texts, *, kind: str):
         raise ValueError("kind must be 'passage' or 'query'")
     model = load_model()
     prefixed = [f"{kind}: {t}" for t in texts]
+    device = _pick_device()
+    batch_size = 128 if device == "cuda" else 32
     embs = model.encode(
         prefixed,
         normalize_embeddings=True,  # cosine 用に正規化
-        show_progress_bar=len(prefixed) > 32,
-        batch_size=32,
+        show_progress_bar=len(prefixed) > batch_size,
+        batch_size=batch_size,
     )
     return embs.tolist()
 

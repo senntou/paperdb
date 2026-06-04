@@ -1,23 +1,25 @@
-PY := .venv/bin/python
-PIP := .venv/bin/pip
+PY := uv run python
 
 .DEFAULT_GOAL := ingest
 
-.PHONY: setup ingest query clean help
+.PHONY: setup ingest fetch query clean help
 
 help:
-	@echo "make setup           # 仮想環境(.venv)作成 + 依存インストール（初回のみ）"
+	@echo "make setup           # 依存インストール（初回のみ）"
+	@echo "make fetch           # urls.txt に記載のURLからPDFをダウンロード"
 	@echo "make ingest          # pdf/ の新規・更新PDFを取り込み（テキスト化+ベクトル化+DB保存）"
 	@echo 'make query Q="質問"  # DBに質問して上位ヒットを表示'
 	@echo "make clean           # txt/ db/ .state/ を削除（PDFは消えない）"
 
 setup:
-	uv venv .venv
-	uv pip install --python .venv -r requirements.txt
+	uv sync
 	@echo "セットアップ完了。次に: pdf/ にPDFを入れて 'make ingest'"
 
+fetch:
+	$(PY) scripts/fetch.py
+
 ingest:
-	$(PY) scripts/ingest.py
+	PAPERDB_DEVICE=$(DEVICE) $(PY) scripts/ingest.py
 
 query:
 	@test -n "$(Q)" || (echo 'Q を指定してください: make query Q="質問文"'; exit 1)

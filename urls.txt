@@ -1,0 +1,8 @@
+# 取得したい論文PDFのURLを1行1件で記載
+# '#' 以降はコメントとして無視されます
+#
+# 例:
+# https://arxiv.org/pdf/1905.10310   # SelectiveNet
+
+https://arxiv.org/pdf/2307.12914
+https://arxiv.org/pdf/2511.18978
